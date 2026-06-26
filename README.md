@@ -1,4 +1,4 @@
-# CONSOMMATION-ENERGETIQUE-EN-FRANCE-DE-2012-2024-
+# CONSOMMATION-ENERGETIQUE-EN-FRANCE-DE-2012-2024
 
 Ce projet vise à analyser les consommations énergétiques des grandes régions urbaines françaises sur la période 2015-2024. L'objectif est de comprendre la structure énergétique de ces territoires et d'identifier les tendances sectorielles.
 
