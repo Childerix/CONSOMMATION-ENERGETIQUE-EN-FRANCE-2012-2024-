@@ -1,0 +1,573 @@
+---
+title: "Projet final - Consommation d'énergie par département"
+subtitle: "Introduction à l'analyse de données avec R | 2025-2026"
+author: "Childéric KEMAYOU POUNGUE"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+library(tidyverse)
+```
+
+## 1. Contexte et source des données
+
+> Description précise du jeu de données (origine, producteur, période, thématique) en quelques phrases. Mention de source présente et correctement formatée.
+
+Ce jeux de données a pour thème Consommation, Territoires et régions et a été constitué à partir des données locales de consommation finale en MWH (Gaz et électricité) regroupées par département et par années sur le territoire français.
+
+Modifié le 20/11/2018, il a été publié par le ministère de la Transition Ecologique et Solidaire le 01/10/2020.
+
+Il est notamment utilisé dans le tableau de bord Régional, en licence ouverte, il a été produit en Français par le SDES, ODRE.
+
+De plus, sa reférence est: (http://www.statistiques.developpement-durable.gouv.fr/energie-climat/r/toutes-energies-donnees-locales-denergie-2.html)
+
+> **Source** : [Consommation départementale annuelle — ODRÉ / OpenDataSoft](https://odre.opendatasoft.com/explore/dataset/conso-departement-annuelle/information/?disjunctive.libelle_region&disjunctive.libelle_departement&disjunctive.g_operateurs&disjunctive.e_operateurs)\
+> **Licence** : Licence Ouverte / Open Licence v2.0 (Etalab) — réutilisation libre avec mention de la source.
+
+
+------------------------------------------------------------------------
+
+## 2. Import et premier aperçu
+
+```{r Import du fichier CSV}
+
+conso <- read_csv2("C://Users/PC/Documents/Cours_NEXA/Analyse de données avec R/CSV/conso-departement-annuelle.csv", locale = locale(encoding = "UTF-8"), na = c("", "NA", "N/A", "-", "n/a"))
+```
+
+```{r apercu}
+# Nombre des 5 premieres lignes
+head(conso, n=5)
+
+# Noms des toutes les colonnes
+names(conso)
+
+# Structure et types
+str(conso)
+
+# Résumé statistique
+glimpse(conso)
+```
+
+# Description de ce que j'observe sur ce premier aperçu
+
+J'observe bien évidemment 1311 lignes avec 28 colonnes (Les années, plusieurs colonnes d'identification du département, colonnes de consommations agriculture, industrie, residentiel, tertiaire, autre, total, opérateur) et les colonnes des consommations en électricité des consommations sus-citées. 
+
+------------------------------------------------------------------------
+
+## 3. Contrôle qualité —
+
+### 3.1 Valeurs manquantes
+
+```{r na_par_colonne}
+# Compter les NA par colonne
+  conso |> summarise(across(everything(), ~ sum(is.na(.))))
+
+# Proportions de NA (%) par colonne
+conso |> summarise(across(everything(), ~ sum(is.na(.))/nrow(conso)*100))
+
+```
+
+Il n y a pas vraiment des c'est nes seule valeur dans plusieurs colonnes. c'est une seule valeur manquantes dans plusieurs colonnes. 
+
+### 3.2 Doublons
+
+```{r doublons}
+# Nombre de lignes dupliquées
+sum(duplicated(conso))
+
+
+```
+
+Il n y a aucun doublon dans ce dataset.
+
+### 3.3 Types de colonnes
+
+```{r types}
+# Vérifier les types de chaque colonne
+sapply(conso, class)
+```
+
+Les types des colonnes me semblent incohérents, notamment les consommations qui sont des characters au lieu d'etre de type numérique (int, float, ...).
+
+## 3.4. Valeurs incohérentes
+```{r Valeurs incohérentes}
+# Vérifions si les années contiennent uniquement 4 chiffres valables...
+for (n in conso[["Année"]]){
+  if(nchar(n)!=4 | grepl("^[0-9]+$", as.character(n)) != TRUE){
+    print(paste("Année incohérente", n, sep=" : "))
+    break
+  }
+}
+
+# vérifions si les codes des départements ou régions sont valides
+for (i in conso[["Code département"]]){
+  if(nchar(i)!=2){
+    print(paste("Code Département invalide", i, sep=" : "))
+    break
+  }
+}
+
+for (i in conso[["Code région"]]){
+  if(nchar(i)!=2){
+    print(paste("Code Région invalide", i, sep=" : "))
+    break
+  }
+}
+``` 
+
+## 3.5. Valeurs abberrantes
+```{r Valeurs abberrantes}
+# Il est nécessaire de convertir les types de données avant de détecter les valeurs abberrantes car elle prend uniquement en compte les colonnes numeriques...
+
+# conversion des types de données 'character' des colonnes en 'numeric'
+colonnes_convert_numerique <- list(
+  "Consommation industrie (MWh)", "Consommation tertiaire (MWh)", "Consommation électricité agriculture (MWh)", "Consommation électricité résidentiel (MWh)", "Consommation électricité autre (MWh)", "Consommation gaz industrie (MWh)", "Consommation gaz tertiaire (MWh)", "Consommation gaz totale (MWh)", "Consommation agriculture (MWh)", "Consommation résidentiel (MWh)", "Consommation autre (MWh)", "Consommation électricité industrie (MWh)", "Consommation électricité tertiaire (MWh)", "Consommation gaz agriculture (MWh)", "Consommation gaz résidentiel (MWh)", "Consommation gaz autre (MWh)")
+
+for (n in colonnes_convert_numerique){
+  conso[[n]] <- parse_number(
+    conso[[n]], locale = locale(decimal_mark = ",", grouping_mark = " ")
+  )
+}
+
+conso[["Code région"]] <- as.character(conso[["Code région"]])
+
+# Création d'une liste avec les noms des colonnes de types numeric
+Liste_val_abberrantes <- list()
+Liste_val_abberrantes_nbres <- list()
+
+for(n in names(conso)){
+  if(class(conso[[n]]) == "numeric"){
+    Liste_val_abberrantes <- c(Liste_val_abberrantes, n)
+  }
+}
+
+# Détection des valeurs abberrantes dans chaque colonne de la liste créée...
+Val_man = 0
+for(i in Liste_val_abberrantes){
+  Q1 <- quantile(conso[[i]], 0.25)
+  Q3 <- quantile(conso[[i]], 0.75)
+  IQR <- Q3 - Q1
+  Borne_inf <- Q1 - (1.5*IQR)
+  Borne_sup <- Q3 + (1.5*IQR)
+  for (n in conso[[i]]){
+    if(n<Borne_inf | n>Borne_sup){
+      Val_man = Val_man + 1
+    }
+  }
+   # Remplissage du nombre de valeurs abberrantes par colonne dans la liste dédiée...
+    Liste_val_abberrantes_nbres <- c(Liste_val_abberrantes_nbres, Val_man)
+    Val_man <- 0
+}
+# Affichage des resultats
+i <- 0
+print("Nombres de valeurs abberrantes par colonne...")
+for(n in Liste_val_abberrantes){
+  i = i + 1
+  print(paste(n, Liste_val_abberrantes_nbres[[i]],sep=" : "))
+}
+```
+------------------------------------------------------------------------
+
+## 4. Nettoyage
+
+> **Critères** : les problèmes identifiés en section 3 sont traités avec le bon outil (renommage, conversion de type, suppression de colonnes inutiles, gestion des NA…) — 1,5 pt. Chaque transformation est justifiée par un commentaire dans le code ou une phrase rédigée — 1 pt. Le jeu nettoyé est stocké dans un nouvel objet (les données brutes sont préservées) — 0,5 pt.
+
+*(Si des problèmes ont été identifiés à l'étape 3, traitez-les ici. Si le jeu est propre, l'indiquer explicitement.)*
+
+```{r nettoyage}
+
+# Pas besoin de renommer des colonnes, elles sont déjà assez claire.
+# Pas besoin de supprimer des colonnes inutiles car il y en a, toutes les colonnes sont serviables.
+
+# Gestion des valeurs manquantes
+# Ici on va remplacer les valeurs manquantes des colonnes qui en ont par le mode car ce sont uniquement des variables qualitatives qui ont des valeurs manquantes...
+
+colonnes_na_qualitative <- list("Géo-shape département", "Géo-point département", "Code région")
+
+for (n in colonnes_na_qualitative){
+  conso[[n]] <- replace_na(conso[[n]], names(which.max(table(conso[[n]]))))
+}
+
+# Nettoyage des valeurs abberrantes, on va mettre une condition simple, pour chaque colonne, ma fonction calculera la moyenne et la médiane simultanément, si l'un est trop éloigné de l'autre, alors les valeurs abberrantes seront remplacées automatiquement par la médiane, au cas contraire, par la moyenn...
+
+ValAbberrantes <- function (df, col, Liste_val_abberrantes){
+  MEDIANE <- median(df[[col]], na.rm = TRUE)  
+  for(i in Liste_val_abberrantes){
+        Q1 <- quantile(df[[i]], 0.25, na.rm=TRUE)
+        Q3 <- quantile(df[[i]], 0.75, na.rm=TRUE)
+        IQR <- Q3 - Q1
+        Borne_inf <- Q1 - (1.5*IQR)
+        Borne_sup <- Q3 + (1.5*IQR)
+        for (n in seq_along(df[[i]])){
+          if(df[[i]][n]<Borne_inf | df[[i]][n]>Borne_sup){
+            df[[i]][n] <- MEDIANE
+          }
+        }}
+    return(df)
+  }
+
+for (n in Liste_val_abberrantes){
+  conso <- ValAbberrantes(conso, n, Liste_val_abberrantes) 
+}
+
+## Supprimons le troisième chiffre de tout les code département...
+for (i in seq_along(conso[["Code département"]])){
+    conso[["Code département"]][i] <- substr(conso[["Code département"]][i],1,2)
+}
+
+## Ajoutons un '0' à la fin de tout les codes régions qui n'en ont qu'un seul...
+for (i in seq_along(conso[["Code région"]])){
+  if(nchar(conso[["Code région"]][i])==1){
+    conso[["Code région"]][i] <- paste0(conso[["Code région"]][i], '0')
+  }
+}
+
+```
+
+Les différentes opérations effectuées : 
+
+-- J'ai converti les types de données nécessaires en prévoyant des calculs...
+-- J'ai remplacé les valeurs manquantes des variables qualitatives par le mode de la colonne...
+-- J'ai remplacé les valeurs abberrantes de chaque variable quantitative par la mediane de la colonne (sachant que la moyenne a une petite probabilité de biaiser les resultats)...
+-- J'ai renvoyer tout les codes de département uniquement aux deux premiers chiffres,
+-- J'ai ajouté un 0 à tout les codes de régions qui n'avait qu'un seul chiffre.
+```{r}
+# Dataset nettoyé
+head(conso, n=5)
+```
+
+------------------------------------------------------------------------
+
+## 5. Analyse descriptive
+
+### 5.1 Statistiques globales
+
+```{r stats_globales}
+# Résumé des quelques statistiques des colonnes numériques (moyenne, médiane, écart-type, minimum et maximum)
+# fonction pour les statistiques d'une seule colonne...
+Statistiques <- function(df, colonne){
+  moyenne = mean(df[[colonne]], na.rm=TRUE)
+  mediane = median(df[[colonne]], na.rm=TRUE)
+  ecart_type = sd(df[[colonne]], na.rm=TRUE)
+  minimum = min(df[[colonne]], na.rm=TRUE)
+  maximum = max(df[[colonne]], na.rm=TRUE)
+  statistiques_cles <- tibble(
+    Colonne = colonne, 
+    Moyenne = moyenne, 
+    Mediane = mediane, 
+    EcartType = ecart_type,
+    Minimum = minimum,
+    Maximum = maximum
+  )
+  print(statistiques_cles)
+  return(statistiques_cles)
+}
+
+# boucle pour afficher toutes les statistiques sélectionnées sur les colonnes numériques ...
+for (n in seq_along(Liste_val_abberrantes)){
+  if(as.character(Liste_val_abberrantes[n]) != "Année"){
+    Statistiques(conso, as.character(Liste_val_abberrantes[n]))
+  }
+}
+
+```
+## Interprétations sur les données de distribution
+- Ex1: La consommation agriculture (MWh) et la consommation électricité agriculture ayant tout deux une moyenne éloignée de la médiane, on peut dire qu'il y a une asymétrie vers la droite, donc certains en consomment excessivement et d'autres, pas autant que ça (peut-etre l'économie...). Ce fait étant confirmé par un écart type plutot élevé pour chacune d'elle... Mais le maximum entre les deux n'est pas la consommation électrique...
+
+- Toutes les autres colonnes numériques toutes aussi pertinentes sont affichées...
+
+### 5.2 Départements aux consommations extrêmes
+
+```{r extremes}
+# 5 départements avec la consommation la plus élevée (toutes années confondues)
+
+Departement_maximal <- conso |> group_by(`Libellé département`) |> summarise(
+  Consommation_totale = sum(`Consommation totale (MWh)`),              
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`),      
+) |> arrange(desc(`Libellé département`)) |> head(n=5)
+
+print(Departement_maximal)
+# 5 départements avec la consommation la plus faible
+
+Departement_minimal<- conso |> group_by(`Libellé département`) |> summarise(
+  Consommation_totale = sum(`Consommation totale (MWh)`),                                  
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`),      
+) |> arrange(`Libellé département`) |> head(n=5)
+print(Departement_minimal)
+```
+
+Les départements de l'Ain, l'Aisme, l'Allier, l'Alpes-Maritimes et l'Alpes-de-Haure-Provence se distinguent des autres par leurs très fortes consommations en gaz, électricités, ... Ce qui pourrait etre expliqué par une forte présence de populations dans ces départements par rapport aux autres départements, notamment Yvelines, Yonne, Vosges, Vienne où il pourrait n'avoir pas une population conséquente. 
+
+La logique est cohérente vu que de plus de en plus il y a de personnes dans un lieu, de plus en plus les dépenses énergétiques et autres augmentent...
+
+### 5.3 Focus sur une ou plusieurs régions 
+
+> **Critères** : filtrage correct sur une région et analyse par département. Commentaire rédigé décrivant le profil de consommation de la région (disparités internes, département dominant, etc.).
+
+```{r focus_region}
+# Choisissons une région et filtrons les données (Île-de-France)
+Filtre_Région <- conso |> filter(`Libellé région` == "Île-de-France")
+print(Filtre_Région)
+
+# Résumé pour cette région (consommations...)
+consommations <- Filtre_Région |> group_by(`Année`) |> summarise(
+  Consommation_agriculture = sum(`Consommation agriculture (MWh)`),
+  Consommation_gaz_agriculture = sum(`Consommation gaz agriculture (MWh)`),
+  Consommation_électricité_agriculture = sum(`Consommation électricité agriculture (MWh)`),
+  Consommation_industrie = sum(`Consommation industrie (MWh)`),                          
+  Consommation_gaz_industrie = sum(`Consommation gaz industrie (MWh)`),                    
+  Consommation_électricité_industrie = sum(`Consommation électricité industrie (MWh)`),    
+  Consommation_résidentiel = sum(`Consommation résidentiel (MWh)`),                        
+  Consommation_gaz_résidentiel = sum(`Consommation gaz résidentiel (MWh)`),                
+  Consommation_électricité_résidentiel = sum(`Consommation électricité résidentiel (MWh)`),
+  Consommation_tertiaire = sum(`Consommation tertiaire (MWh)`),                          
+  Consommation_gaz_tertiaire = sum(`Consommation gaz tertiaire (MWh)`),                    
+  Consommation_électricité_tertiaire = sum(`Consommation électricité tertiaire (MWh)`),
+  Consommation_autre = sum(`Consommation autre (MWh)`),                                
+  Consommation_gaz_autre = sum(`Consommation gaz autre (MWh)`),                            
+  Consommation_électricité_autre = sum(`Consommation électricité autre (MWh)`),            
+  Consommation_totale = sum(`Consommation totale (MWh)`),                                  
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`)
+) |> arrange(desc(`Année`))
+
+
+print(consommations)
+
+# Consommation par département dans la région
+consomations_departement <- Filtre_Région |> group_by(`Libellé département`) |> summarise(
+  Consommation_agriculture = sum(`Consommation agriculture (MWh)`),
+  Consommation_gaz_agriculture = sum(`Consommation gaz agriculture (MWh)`),
+  Consommation_électricité_agriculture = sum(`Consommation électricité agriculture (MWh)`),
+  Consommation_industrie = sum(`Consommation industrie (MWh)`),                          
+  Consommation_gaz_industrie = sum(`Consommation gaz industrie (MWh)`),                    
+  Consommation_électricité_industrie = sum(`Consommation électricité industrie (MWh)`),    
+  Consommation_résidentiel = sum(`Consommation résidentiel (MWh)`),                        
+  Consommation_gaz_résidentiel = sum(`Consommation gaz résidentiel (MWh)`),                
+  Consommation_électricité_résidentiel = sum(`Consommation électricité résidentiel (MWh)`),
+  Consommation_tertiaire = sum(`Consommation tertiaire (MWh)`),                          
+  Consommation_gaz_tertiaire = sum(`Consommation gaz tertiaire (MWh)`),                    
+  Consommation_électricité_tertiaire = sum(`Consommation électricité tertiaire (MWh)`),
+  Consommation_autre = sum(`Consommation autre (MWh)`),                                
+  Consommation_gaz_autre = sum(`Consommation gaz autre (MWh)`),                            
+  Consommation_électricité_autre = sum(`Consommation électricité autre (MWh)`),            
+  Consommation_totale = sum(`Consommation totale (MWh)`),                                  
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`)
+) |> arrange(desc(`Libellé département`))
+
+print(consomations_departement)
+```
+
+En triant par année, on se rend compte qu'au fur et à mesure que les années passent, on pratique de moin en moin l'agriculture en Île-de-France, les consommations liées aux secteurs tertiaires étaient en chute certaines années mais augmentent progressivement, l'industrie augmente petit à petit (gaz, électricité, activité, ...), pareil pour les résidences, le tout avec une consommation totale en électricité, gaz,... en plein accroissement...
+
+On peut donc conclure deux choses actuellement...
+  -- Au fur et à mesure que les années passent, la population d'Île-de-France augmente, ce qui augmente les consommations notamment dans les départements comme Yvelines, Val-de-Marne, Val-d'Oise, Seine-et-Marne, Seine-Saint-Denis,...
+  -- L'agriculture diminue car vu qu'il y a des personnes qui s'ajoutent, on doit construire plus de lieux d'habitations, donc on diminue l'espace devant servir à pratiquer l'agriculture.
+  -- Il y a eu un pic de consommation dans le secteur tertiaire, ce qui voudrait dire que les domaines comme le domaine bancaire s'accroissent sur le marché donnant place à une consommation supplémentaire en quete technologie de pointe...
+
+### 5.4 Évolution dans le temps
+
+```{r evolution}
+# Consommation totale par année (France entière)
+
+consommationTotale <- conso |> group_by(`Année`) |> summarise(
+  Consommation_totale = sum(`Consommation totale (MWh)`),                                  
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`)
+) |> arrange(desc(`Année`))
+
+print(consommationTotale)
+
+# Évolution pour un département de votre choix
+
+ConsommationTotale_Val_Oise <- conso |> filter(`Libellé département` == "Val-d'Oise")
+
+consommationTotale_Oise <- ConsommationTotale_Val_Oise |> group_by(`Année`) |> summarise(
+  Consommation_totale = sum(`Consommation totale (MWh)`),                                  
+  Consommation_gaz_totale = sum(`Consommation gaz totale (MWh)`),                          
+  Consommation_électricité_totale = sum(`Consommation électricité totale (MWh)`)
+) |> arrange(desc(`Année`))
+
+print(consommationTotale_Oise)
+
+```
+
+Globalement, d'après les données obtenues, les consommations sont plutot stables... 
+
+En particulier pour le département du Val-d'Oise, celui-ci a une consommation totale pareille de 2019-2024. A partir de 2018, on note une évolution importante des consommations, ceci pourrait etre expliqué par soit l'utilisation des machines ou autres qui nécessitent une plus importante consommation en énergie ou encore, c'est en cette année que diverse population d'ailleurs se sont dirigées en ile de france notamment dans ce département (vu plus haut dans les analyses que c'est l'un des départements ayant une plus forte consommation) peut etre parceque le cout de vie est moins élevé qu'à Paris par exemple où la consommation totale est plutot inférieure à celle du Val-d'Oise..., étant la capitale, on peut imaginer que le cout de vie dois etre élevé...
+
+### 5.5 Analyse libre — ma problématique 
+
+### Problématique: 
+Les grandes régions urbaines se développent davantage ces 10 dernières années via quels secteurs d'activités? Y a t il des secteurs qu'ils délaissent progressivement au profil des autres pour promouvoir leurs développements?
+
+**Étape 2 - Premier axe d'analyse**
+
+Pour une première analyse, il sera question d'utiliser toutes les données de consommation. 
+Les consommations pour identifier les grandes régions urbaines via un groupement. A partir de cela on peut donc identifier quelle consommation est la plus élevé dans différents secteurs mésurés sur les 10 dernières années (2015 à 2024). 
+
+```{r analyse_libre_1}
+
+# filtrage des consommations sur les 10 dernières années (2015-2024)
+conso_filtrage <- conso |> filter(Année >= "2015" & Année <= "2024")
+
+# Identification des 10 plus grandes régions urbaines des 10 dernières années (régions ayant les plus grandes consommations de toute la France de 2015-2024)
+
+grandes_regions <- conso_filtrage |> group_by(`Année`, `Libellé région`) |> summarise(
+  ConsoAgriculture = sum(`Consommation agriculture (MWh)`),
+  ConsoIndustrie = sum(`Consommation industrie (MWh)`),
+  ConsoResidentiel = sum(`Consommation résidentiel (MWh)`),
+  ConsoTertiaire = sum(`Consommation tertiaire (MWh)`),
+  ConsoAutre = sum(`Consommation autre (MWh)`),
+  ConsoTotale = sum(`Consommation totale (MWh)`),
+  Conso_electricité_Agriculture = sum(`Consommation électricité agriculture (MWh)`),
+  Conso_electricité_Industrie = sum(`Consommation électricité industrie (MWh)`),
+  Conso_electricité_Residentiel = sum(`Consommation électricité résidentiel (MWh)`),
+  Conso_electricité_Tertiaire = sum(`Consommation électricité tertiaire (MWh)`),
+  Conso_electricité_Autre = sum(`Consommation électricité autre (MWh)`),
+  Conso_electricité_Totale = sum(`Consommation électricité totale (MWh)`),
+  Conso_gaz_Agriculture = sum(`Consommation gaz agriculture (MWh)`),
+  Conso_gaz_Industrie = sum(`Consommation gaz industrie (MWh)`),
+  Conso_gaz_Residentiel = sum(`Consommation gaz résidentiel (MWh)`),
+  Conso_gaz_Tertiaire = sum(`Consommation gaz tertiaire (MWh)`),
+  Conso_gaz_Autre = sum(`Consommation gaz autre (MWh)`),
+  Conso_gaz_Totale = sum(`Consommation gaz totale (MWh)`)
+) |> arrange(desc(`Année`))
+
+head(grandes_regions[['Libellé région']], n=10)
+
+# Affichons les secteurs d'activités de chacune des 10 regions urbaines par consommations totales décroissantes histoire de savoir quels secteurs les grandes régions priorisent pour se développer de 2015-2024...
+
+# On renseigne tout d'abord dans une liste le top 10 des régions urbaines...
+Regions_urbaines <- list()
+
+# Boucle pour ajouter dans la liste Regions_urbaines les 10 premiers noms des régions car dans grandes_regions c'est déjà par ordre décroissant...
+for (i in seq_along(grandes_regions[["Libellé région"]])){
+  if(i>10){break}
+  Regions_urbaines <- c(Regions_urbaines, grandes_regions[["Libellé région"]][i])
+}
+
+# On filtre ce top 10 dans le dataset regroupant toutes les régions
+Secteurs_filtres <- grandes_regions |> filter(`Libellé région` %in% Regions_urbaines)
+
+# On filtre les consommations par ordre décroissant...
+Secteurs_activités <- Secteurs_filtres |> group_by(`Année`) |> arrange(desc(`Année`))
+
+Secteurs_activités
+```
+
+Cette analyse partielle m'a permise de ressortir les grandes régions urbaines (10) ces dix dernières années ainsi que la somme de leurs consommations sur plusieurs plans. 
+On peut remarquer sur les resultats que les grandes régions reposent leurs économies sur les secteurs résidentiels et industriels, puis vient le secteur tertiaire (banque, ...) au vue de leurs consommations totale.
+
+Mais ce qui est le plus étrange c'est que certaines grandes régions de 2015-2016 ne consomment pas d'énergie dans le secteurs de l'agriculture, de la residence, de l'industrie et le tertiaire. Donc ces régions n'étaient pas encore sur ces marchés? ce sont des données manquantes? Cela biaise nos analyses?... On peut imaginer un manque de main d'oeuvre qualifié, ou bien un manque de matériaux? espace dédiés? idées? 
+Mais s'investir sur ces marchés développent clairement l'économie du Pays...
+
+On peut aussi voir que certains secteur d'activités sont plutot faibles en consommation comparé aux autres, c'est le cas de la 	Bretagne en 2024, l'activité de l'agriculture n'est pas vraiment mis en avant comparé aux industrie, les résidences. On peut donc conclure qu'au fur et à mesure les régions délaisse progressivement certains secteurs au profil des autres (l'industrialisation, ...) afin d'augmenter son économie, mais n'abandonnent pas ces autres secteurs car ils sont d'un besoin vital... S'il n y a pas d'agriculture, la nutrition sera davantage menacée... (les conséquences peuvent etre imagnable)...
+------------------------------------------------------------------------
+
+**Étape 3 - Deuxième axe d'analyse**
+
+*(Le deuxième axe doit aborder la même problématique sous un angle différent : autre variable, autre découpage géographique, autre période, ou croisement de deux dimensions.)*
+> filter()
+Votre texte ici.
+
+```{r analyse_libre_2}
+# Ici, on va plutot analyser les différences de consommation chaque 5 ans de 2015-2024...
+
+# Ici, on va diviser le dataset en 2, celui de 2015-2019 et 2020-2024
+
+Dataset1 <- Secteurs_activités |> filter(`Année`>=2015 & `Année`<=2019)
+Dataset2 <- Secteurs_activités |> filter(`Année`>=2020 & `Année`<=2024)
+
+
+# Crétion d'une colonne de consommation totale en énergie dans la région...
+Dataset1 <- Dataset1 |> mutate(
+  ConsoTotale = ConsoAgriculture + ConsoIndustrie + ConsoResidentiel + ConsoTertiaire + ConsoAutre + ConsoTotale + Conso_electricité_Agriculture + Conso_electricité_Industrie + Conso_electricité_Residentiel + Conso_electricité_Tertiaire + Conso_electricité_Autre + Conso_electricité_Totale + Conso_gaz_Agriculture + Conso_gaz_Industrie + Conso_gaz_Residentiel + Conso_gaz_Tertiaire + Conso_gaz_Autre + Conso_gaz_Totale
+)
+
+Dataset2 <- Dataset2 |> mutate(
+  ConsoTotale = ConsoAgriculture + ConsoIndustrie + ConsoResidentiel + ConsoTertiaire + ConsoAutre + ConsoTotale + Conso_electricité_Agriculture + Conso_electricité_Industrie + Conso_electricité_Residentiel + Conso_electricité_Tertiaire + Conso_electricité_Autre + Conso_electricité_Totale + Conso_gaz_Agriculture + Conso_gaz_Industrie + Conso_gaz_Residentiel + Conso_gaz_Tertiaire + Conso_gaz_Autre + Conso_gaz_Totale
+)
+# Là on va groupé par Libellé région décroissante...
+
+Data1 <- Dataset1 |> group_by(`Libellé région`) |> summarise(
+  ConsoAgriculture = sum(`ConsoAgriculture`),
+  ConsoIndustrie = sum(`ConsoIndustrie`),
+  ConsoResidentiel = sum(`ConsoResidentiel`),
+  ConsoTertiaire = sum(`ConsoTertiaire`),
+  ConsoAutre = sum(`ConsoAutre`),
+  ConsoTotale = sum(`ConsoTotale`),
+  Conso_electricité_Agriculture = sum(`Conso_electricité_Agriculture`),
+  Conso_electricité_Industrie = sum(`Conso_electricité_Industrie`),
+  Conso_electricité_Residentiel = sum(`Conso_electricité_Residentiel`),
+  Conso_electricité_Tertiaire = sum(`Conso_electricité_Tertiaire`),
+  Conso_electricité_Autre = sum(`Conso_electricité_Autre`),
+  Conso_electricité_Totale = sum(`Conso_electricité_Totale`),
+  Conso_gaz_Agriculture = sum(`Conso_gaz_Agriculture`),
+  Conso_gaz_Industrie = sum(`Conso_gaz_Industrie`),
+  Conso_gaz_Residentiel = sum(`Conso_gaz_Residentiel`),
+  Conso_gaz_Tertiaire = sum(`Conso_gaz_Tertiaire`),
+  Conso_gaz_Autre = sum(`Conso_gaz_Autre`),
+  Conso_gaz_Totale = sum(`Conso_gaz_Totale`)
+) |> arrange(desc(`ConsoTotale`))
+
+Data2 <- Dataset2 |> group_by(`Libellé région`) |> summarise(
+  ConsoAgriculture = sum(`ConsoAgriculture`),
+  ConsoIndustrie = sum(`ConsoIndustrie`),
+  ConsoResidentiel = sum(`ConsoResidentiel`),
+  ConsoTertiaire = sum(`ConsoTertiaire`),
+  ConsoAutre = sum(`ConsoAutre`),
+  ConsoTotale = sum(`ConsoTotale`),
+  Conso_electricité_Agriculture = sum(`Conso_electricité_Agriculture`),
+  Conso_electricité_Industrie = sum(`Conso_electricité_Industrie`),
+  Conso_electricité_Residentiel = sum(`Conso_electricité_Residentiel`),
+  Conso_electricité_Tertiaire = sum(`Conso_electricité_Tertiaire`),
+  Conso_electricité_Autre = sum(`Conso_electricité_Autre`),
+  Conso_electricité_Totale = sum(`Conso_electricité_Totale`),
+  Conso_gaz_Agriculture = sum(`Conso_gaz_Agriculture`),
+  Conso_gaz_Industrie = sum(`Conso_gaz_Industrie`),
+  Conso_gaz_Residentiel = sum(`Conso_gaz_Residentiel`),
+  Conso_gaz_Tertiaire = sum(`Conso_gaz_Tertiaire`),
+  Conso_gaz_Autre = sum(`Conso_gaz_Autre`),
+  Conso_gaz_Totale = sum(`Conso_gaz_Totale`)
+) |> arrange(desc(`ConsoTotale`))
+print(Data1)
+print(Data2)
+
+```
+
+Cette deuxième analyse vient juste confirmer ma première analyse, avec la région d'Auvergne-Rhône-Alpes avec une consommation totale de 934,266,011 MWh tout secteur confondu en tete de 2015-2024...
+
+------------------------------------------------------------------------
+
+**Étape 4 - Synthèse**
+
+## Synthèse
+Pour leurs développements, les régions se propulsent dans divers domaines d'activités, notamment celui de l'industrie, résidentiel, tertiaire enfin celui de l'agriculture meme si celui ci diminue d'année en année mais n'est pas délaissé pour cause de besoin vital...
+
+On emet cette hypothèse en ne prennant pas en compte qu'il peut y avoir des valeurs manquantes certaines années notamment de 2015-2016 pour plusieurs régions...
+
+En prenant en compte année par année, puis avec un bon de 5 ans (de 2015-2019 puis de 2020-2024), on remarque qu'on a le meme resultat à une petite différence pret d'incertitude (biai)...
+
+## 6. Conclusion
+
+  Cette analyse montre que les grandes régions urbaines françaises structurent leur économie autour de **trois piliers énergétiques** : le résidentiel, l'industrie et le tertiaire, avec une domination souvent marquée du secteur résidentiel dans la consommation totale.
+  
+  Les disparités observées entre régions, notamment les "zeros" dans certains secteurs entre 2015 et 2016, traduisent davantage des **limites de collecte des données** que de réelles absences d'activité, même si elles révèlent des spécialisations territoriales.
+
+  Les écarts constatés entre la somme des consommations sectorielles et le "total" affiché dans le dataset soulignent l'importance de **recalculer soi-même ses indicateurs**, car le total officiel inclut souvent des ajustements, des pertes réseau ou des périmètres différents.
+
+  Au fil des années, on observe une **évolution des mix énergétiques régionaux**, avec un glissement progressif vers les secteurs industriels et tertiaires, tandis que l'agriculture, bien que vitale pour la souveraineté alimentaire, pèse peu en termes de consommation énergétique.
+
+  En définitive, ces données permettent de **cartographier les forces et faiblesses structurelles** des territoires, mais appellent à une lecture prudente et croisée avec d'autres indicateurs (PIB, population, climat) pour éviter des conclusions hâtives sur le développement économique régional. 
+
